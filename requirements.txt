@@ -1,0 +1,8 @@
+numpy
+torch
+gymnasium
+gymnasium[atari]
+gymnasium[box2d]
+ale-py
+opencv-python
+matplotlib

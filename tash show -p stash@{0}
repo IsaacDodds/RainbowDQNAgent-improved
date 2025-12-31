@@ -1,0 +1,111 @@
+[1mdiff --git a/main.py b/main.py[m
+[1mindex dad0bde..c8e3615 100644[m
+[1m--- a/main.py[m
+[1m+++ b/main.py[m
+[36m@@ -7,7 +7,7 @@[m [mfrom rewards import plot_rewards, plot_reward_distribution[m
+ def main():[m
+ [m
+     config = {[m
+[31m-        "batch_size": 32,[m
+[32m+[m[32m        "batch_size": 96,[m
+         "gamma": 0.99,[m
+         "eps_start": 1.0,[m
+         "eps_end": 0.05,[m
+[36m@@ -17,7 +17,7 @@[m [mdef main():[m
+         "num_episodes": 1000,[m
+         "target_update_type": "hard",   # "hard" or "soft"[m
+         "target_update_freq": 5000,     # steps (only for hard)[m
+[31m-        "env_name": "LunarLander-v3",     # LunarLander-v3     ALE/Pong-v5     CartPole-v1[m
+[32m+[m[32m        "env_name": "ALE/Frostbite-v5",     # LunarLander-v3     ALE/Pong-v5     CartPole-v1[m
+     }[m
+ [m
+  [m
+[36m@@ -26,7 +26,7 @@[m [mdef main():[m
+     [m
+     # agent.load_model("runs/run-lunar-20251218-105055/model_1766055116.pth")[m
+     # Train[m
+[31m-    agent.train(run_name="lunar", max_frames=10000000000, save_interval = 5, live_plot_enabled=True, verbose=True)[m
+[32m+[m[32m    agent.train(run_name="Frostbite", max_frames=10000000000, save_interval = 30, live_plot_enabled=True, verbose=True)[m
+ [m
+     # # Plot rewards after training[m
+     # rewards = np.load("rewards_1765411435.npy")[m
+[36m@@ -38,7 +38,7 @@[m [mdef main():[m
+         bins=60,[m
+         last_n=500,[m
+         xlim=(-600, 400),[m
+[31m-        title="Rainbow (LunarLander): Reward Distribution (last 500 episodes)",[m
+[32m+[m[32m        title="Frostbite: Reward Distribution (last 500 episodes)",[m
+         density=True,[m
+     )[m
+ [m
+[1mdiff --git a/rainbowdqn_agent.py b/rainbowdqn_agent.py[m
+[1mindex 132077b..7dff57e 100644[m
+[1m--- a/rainbowdqn_agent.py[m
+[1m+++ b/rainbowdqn_agent.py[m
+[36m@@ -156,7 +156,7 @@[m [mclass RainbowDQNAgent:[m
+ [m
+             action = self.select_action(state)[m
+ [m
+[31m-            next_state, reward, terminated, truncated, _ = self.env.step(action)[m
+[32m+[m[32m            next_state, reward, -terminated, truncated, _ = self.env.step(action)[m
+             next_state = np.array(next_state, dtype=np.float32, copy=False)[m
+             done = terminated or truncated[m
+ [m
+[36m@@ -199,7 +199,7 @@[m [mclass RainbowDQNAgent:[m
+ [m
+ [m
+             if ep >= 100 and avg_100 >= 200.0:[m
+[31m-                print("✅ Solved LunarLander! Saving final model and stopping training.")[m
+[32m+[m[32m                print("Solved LunarLander! Saving final model and stopping training.")[m
+                 self.solved = True[m
+ [m
+                 ts = int(time.time())[m
+[36m@@ -240,7 +240,7 @@[m [mclass RainbowDQNAgent:[m
+         actions     = torch.tensor(actions, dtype=torch.long, device=self.device).unsqueeze(1)[m
+         rewards     = torch.tensor(rewards, dtype=torch.float32, device=self.device).unsqueeze(1)[m
+         next_states = torch.tensor(next_states, dtype=torch.float32, device=self.device)[m
+[31m-        dones       = torch.tensor(dones, dtype=torch.float32, device=self.device).unsqueeze(1)[m
+[32m+[m[32m        dones       = torch.tensor(dones, dtype=torch.bool, device=self.device).unsqueeze(1)[m
+         gammas      = torch.tensor(gammas, dtype=torch.float32, device=self.device).unsqueeze(1)[m
+         weights     = torch.tensor(weights, dtype=torch.float32, device=self.device).unsqueeze(1)[m
+ [m
+[1mdiff --git a/replay_buffer.py b/replay_buffer.py[m
+[1mindex b8416c1..6c733fb 100644[m
+[1m--- a/replay_buffer.py[m
+[1m+++ b/replay_buffer.py[m
+[36m@@ -54,12 +54,12 @@[m [mclass NStepPrioritizedReplayBuffer:[m
+         self.size = 0[m
+ [m
+         # Replay arrays[m
+[31m-        self.obs       = np.zeros((capacity, *obs_shape), dtype=np.float32)[m
+[31m-        self.next_obs  = np.zeros((capacity, *obs_shape), dtype=np.float32)[m
+[31m-        self.actions   = np.zeros((capacity,), dtype=np.int64)[m
+[31m-        self.rewards   = np.zeros((capacity,), dtype=np.float32)[m
+[31m-        self.dones     = np.zeros((capacity,), dtype=np.float32)[m
+[31m-        self.discounts = np.zeros((capacity,), dtype=np.float32)[m
+[32m+[m[32m        self.obs       = np.zeros((capacity, *obs_shape), dtype=np.float16)[m
+[32m+[m[32m        self.next_obs  = np.zeros((capacity, *obs_shape), dtype=np.float16)[m
+[32m+[m[32m        self.actions   = np.zeros((capacity,), dtype=np.uint8)[m
+[32m+[m[32m        self.rewards   = np.zeros((capacity,), dtype=np.float16)[m
+[32m+[m[32m        self.dones     = np.zeros((capacity,), dtype=np.bool)[m
+[32m+[m[32m        self.discounts = np.zeros((capacity,), dtype=np.float16)[m
+ [m
+         # PER parameters[m
+         self.alpha = alpha[m
+[36m@@ -214,11 +214,11 @@[m [mclass NStepPrioritizedReplayBuffer:[m
+ [m
+ class ReplayBuffer:[m
+     def __init__(self, obs_dim: int, size: int, batch_size: int = 32):[m
+[31m-        self.obs_buf = np.zeros((size, obs_dim), dtype=np.float32)[m
+[31m-        self.next_obs_buf = np.zeros((size, obs_dim), dtype=np.float32)[m
+[31m-        self.acts_buf = np.zeros(size, dtype=np.int64)[m
+[31m-        self.rews_buf = np.zeros(size, dtype=np.float32)[m
+[31m-        self.done_buf = np.zeros(size, dtype=np.float32)[m
+[32m+[m[32m        self.obs_buf = np.zeros((size, obs_dim), dtype=np.float16)[m
+[32m+[m[32m        self.next_obs_buf = np.zeros((size, obs_dim), dtype=np.float16)[m
+[32m+[m[32m        self.acts_buf = np.zeros(size, dtype=np.uint8)[m
+[32m+[m[32m        self.rews_buf = np.zeros(size, dtype=np.float16)[m
+[32m+[m[32m        self.done_buf = np.zeros(size, dtype=np.bool)[m
+         self.max_size, self.batch_size = size, batch_size[m
+         self.ptr, self.size = 0, 0[m
+ [m
