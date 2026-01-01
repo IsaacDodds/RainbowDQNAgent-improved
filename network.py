@@ -1,47 +1,47 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
 
 
 class NoisyLinear(nn.Module):
-    def __init__(self, in_features, out_features, std_init=0.1, use_noisy=True):
+    """
+    Factorised Gaussian NoisyNet layer (Fortunato et al.).
+    Deterministic when .eval() or use_noisy=False.
+    """
+    def __init__(self, in_features: int, out_features: int, std_init: float = 0.1, use_noisy: bool = True):
         super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        self.std_init = std_init
-        self.use_noisy = use_noisy
+        self.in_features = int(in_features)
+        self.out_features = int(out_features)
+        self.std_init = float(std_init)
+        self.use_noisy = bool(use_noisy)
 
-        # Learnable parameters
-        self.weight_mu = nn.Parameter(torch.empty(out_features, in_features))
-        self.weight_sigma = nn.Parameter(torch.empty(out_features, in_features))
-        self.bias_mu = nn.Parameter(torch.empty(out_features))
-        self.bias_sigma = nn.Parameter(torch.empty(out_features))
+        self.weight_mu = nn.Parameter(torch.empty(self.out_features, self.in_features))
+        self.weight_sigma = nn.Parameter(torch.empty(self.out_features, self.in_features))
+        self.bias_mu = nn.Parameter(torch.empty(self.out_features))
+        self.bias_sigma = nn.Parameter(torch.empty(self.out_features))
 
-        # Buffers for noise
-        self.register_buffer("weight_epsilon", torch.empty(out_features, in_features))
-        self.register_buffer("bias_epsilon", torch.empty(out_features))
+        self.register_buffer("weight_epsilon", torch.empty(self.out_features, self.in_features))
+        self.register_buffer("bias_epsilon", torch.empty(self.out_features))
 
         self.reset_parameters()
         self.reset_noise()
 
-    def reset_parameters(self):
-        limit = 1 / math.sqrt(self.in_features)
+    def reset_parameters(self) -> None:
+        limit = 1.0 / math.sqrt(self.in_features)
 
         self.weight_mu.data.uniform_(-limit, limit)
         self.bias_mu.data.uniform_(-limit, limit)
 
-        sigma_w = self.std_init / math.sqrt(self.in_features)
-        sigma_b = self.std_init / math.sqrt(self.out_features)
+        self.weight_sigma.data.fill_(self.std_init / math.sqrt(self.in_features))
+        self.bias_sigma.data.fill_(self.std_init / math.sqrt(self.out_features))
 
-        self.weight_sigma.data.fill_(sigma_w)
-        self.bias_sigma.data.fill_(sigma_b)
-
-    def _scale_noise(self, size):
+    def _scale_noise(self, size: int) -> torch.Tensor:
         x = torch.randn(size, device=self.weight_mu.device)
         return x.sign().mul_(x.abs().sqrt_())
 
-    def reset_noise(self):
+    def reset_noise(self) -> None:
         if not self.use_noisy:
             return
         eps_in = self._scale_noise(self.in_features)
@@ -49,8 +49,7 @@ class NoisyLinear(nn.Module):
         self.weight_epsilon.copy_(eps_out.ger(eps_in))
         self.bias_epsilon.copy_(eps_out)
 
-    def forward(self, x):
-        # Deterministic in eval() or when use_noisy=False
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.training and self.use_noisy:
             w = self.weight_mu + self.weight_sigma * self.weight_epsilon
             b = self.bias_mu + self.bias_sigma * self.bias_epsilon
@@ -61,34 +60,37 @@ class NoisyLinear(nn.Module):
 
 
 class C51NoisyDuelingCNN(nn.Module):
-    def __init__(self, num_actions, atom_size, support, use_noisy=True, use_dueling=True):
+    """
+    Standard Atari conv torso + (optional) dueling heads + C51 distribution.
+    Returns categorical distribution over atoms for each action.
+    """
+    def __init__(self, num_actions: int, atom_size: int, support: torch.Tensor, use_noisy: bool = True, use_dueling: bool = True):
         super().__init__()
-        self.num_actions = num_actions
-        self.atom_size = atom_size
+        self.num_actions = int(num_actions)
+        self.atom_size = int(atom_size)
         self.support = support
-        self.use_dueling = use_dueling
-        self.use_noisy = use_noisy
+        self.use_dueling = bool(use_dueling)
+        self.use_noisy = bool(use_noisy)
 
         self.feature = nn.Sequential(
             nn.Conv2d(4, 32, kernel_size=8, stride=4),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
         )
 
         self.feature_size = 7 * 7 * 64
 
-        # If dueling is off, we only need an advantage-like head, but we keep structure simple
-        self.advantage_hidden = NoisyLinear(self.feature_size, 512, use_noisy=use_noisy)
-        self.advantage = NoisyLinear(512, num_actions * atom_size, use_noisy=use_noisy)
+        self.advantage_hidden = NoisyLinear(self.feature_size, 512, use_noisy=self.use_noisy)
+        self.advantage = NoisyLinear(512, self.num_actions * self.atom_size, use_noisy=self.use_noisy)
 
-        if use_dueling:
-            self.value_hidden = NoisyLinear(self.feature_size, 512, use_noisy=use_noisy)
-            self.value = NoisyLinear(512, atom_size, use_noisy=use_noisy)
+        if self.use_dueling:
+            self.value_hidden = NoisyLinear(self.feature_size, 512, use_noisy=self.use_noisy)
+            self.value = NoisyLinear(512, self.atom_size, use_noisy=self.use_noisy)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor, log: bool = False) -> torch.Tensor:
         x = self.feature(x)
         x = x.view(x.size(0), -1)
 
@@ -102,10 +104,13 @@ class C51NoisyDuelingCNN(nn.Module):
         else:
             q_atoms = adv
 
+        if log:
+            return F.log_softmax(q_atoms, dim=-1)
+
         dist = F.softmax(q_atoms, dim=-1).clamp(min=1e-8)
         return dist
 
-    def reset_noise(self):
+    def reset_noise(self) -> None:
         if not self.use_noisy:
             return
         self.advantage_hidden.reset_noise()
@@ -116,22 +121,26 @@ class C51NoisyDuelingCNN(nn.Module):
 
 
 class C51NoisyDuelingMLP(nn.Module):
-    def __init__(self, obs_dim, num_actions, atom_size, support, use_noisy=True, use_dueling=True):
+    """
+    MLP version for non-Atari environments.
+    """
+    def __init__(self, obs_dim: int, num_actions: int, atom_size: int, support: torch.Tensor, use_noisy: bool = True, use_dueling: bool = True):
         super().__init__()
-        self.num_actions = num_actions
-        self.atom_size = atom_size
+        self.obs_dim = int(obs_dim)
+        self.num_actions = int(num_actions)
+        self.atom_size = int(atom_size)
         self.support = support
-        self.use_dueling = use_dueling
-        self.use_noisy = use_noisy
+        self.use_dueling = bool(use_dueling)
+        self.use_noisy = bool(use_noisy)
 
-        self.advantage_hidden = NoisyLinear(obs_dim, 128, use_noisy=use_noisy)
-        self.advantage = NoisyLinear(128, num_actions * atom_size, use_noisy=use_noisy)
+        self.advantage_hidden = NoisyLinear(self.obs_dim, 128, use_noisy=self.use_noisy)
+        self.advantage = NoisyLinear(128, self.num_actions * self.atom_size, use_noisy=self.use_noisy)
 
-        if use_dueling:
-            self.value_hidden = NoisyLinear(obs_dim, 128, use_noisy=use_noisy)
-            self.value = NoisyLinear(128, atom_size, use_noisy=use_noisy)
+        if self.use_dueling:
+            self.value_hidden = NoisyLinear(self.obs_dim, 128, use_noisy=self.use_noisy)
+            self.value = NoisyLinear(128, self.atom_size, use_noisy=self.use_noisy)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor, log: bool = False) -> torch.Tensor:
         adv = F.relu(self.advantage_hidden(x))
         adv = self.advantage(adv).view(-1, self.num_actions, self.atom_size)
 
@@ -142,10 +151,13 @@ class C51NoisyDuelingMLP(nn.Module):
         else:
             q_atoms = adv
 
+        if log:
+            return F.log_softmax(q_atoms, dim=-1)
+
         dist = F.softmax(q_atoms, dim=-1).clamp(min=1e-8)
         return dist
 
-    def reset_noise(self):
+    def reset_noise(self) -> None:
         if not self.use_noisy:
             return
         self.advantage_hidden.reset_noise()
@@ -153,4 +165,5 @@ class C51NoisyDuelingMLP(nn.Module):
         if self.use_dueling:
             self.value_hidden.reset_noise()
             self.value.reset_noise()
+
 
